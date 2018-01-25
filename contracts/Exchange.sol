@@ -1,8 +1,10 @@
 pragma solidity ^0.4.9;
 
 import "github.com/OpenZeppelin/zeppelin-solidity/contracts/math/SafeMath.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/StandardToken.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/ERC20.sol";
+import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/ERC20/StandardToken.sol";
+import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/ERC20/ERC20.sol";
+import "github.com/OpenZeppelin/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
+import "github.com/OpenZeppelin/zeppelin-solidity/contracts/ownership/Ownable.sol";
 
 contract ReserveToken is StandardToken {
   using SafeMath for uint256;
@@ -13,13 +15,13 @@ contract ReserveToken is StandardToken {
   function create(address account, uint amount) public {
     require(msg.sender == minter);
     balances[account] = balances[account].add(amount);
-    totalSupply = totalSupply.add(amount);
+    totalSupply_ = totalSupply_.add(amount);
   }
   function destroy(address account, uint amount) public {
     require(msg.sender == minter);
     require (balances[account] >= amount);
     balances[account] = balances[account].sub(amount);
-    totalSupply = totalSupply.sub(amount);
+    totalSupply_ = totalSupply_.sub(amount);
   }
 }
 
@@ -36,9 +38,8 @@ contract  AccountLevels {
   }
 }
 
-contract RootDeltaExchange  {
+contract RootDeltaExchange is Pausable{
   using SafeMath for uint256;
-  address public admin; //the admin address
   address public feeAccount; //the account that will receive fees
   address public accountLevelsAddr; //the address of the AccountLevels contract
   uint public feeMake; //percentage times (1 ether)
@@ -54,8 +55,8 @@ contract RootDeltaExchange  {
   event Deposit(address token, address user, uint amount, uint balance);
   event Withdraw(address token, address user, uint amount, uint balance);
 
-  function RootDeltaExchange(address _admin, address _feeAccount, address _accountLevelsAddr, uint _feeMake, uint _feeTake, uint _feeRebate) public {
-    admin = _admin;
+  function RootDeltaExchange(address _owner, address _feeAccount, address _accountLevelsAddr, uint _feeMake, uint _feeTake, uint _feeRebate) public {
+    owner = _owner;
     feeAccount = _feeAccount;
     accountLevelsAddr = _accountLevelsAddr;
     feeMake = _feeMake;
@@ -63,44 +64,36 @@ contract RootDeltaExchange  {
     feeRebate = _feeRebate;
   }
 
- modifier isAdmin(){
-     if(msg.sender == admin){
-         _;
-     }
- }
-  function changeAdmin(address _admin) public  isAdmin {
-    admin = _admin;
-  }
 
-  function changeAccountLevelsAddr(address _accountLevelsAddr) public isAdmin {
+  function changeAccountLevelsAddr(address _accountLevelsAddr) public onlyOwner {
     accountLevelsAddr = _accountLevelsAddr;
   }
 
-  function changeFeeAccount(address _feeAccount) public isAdmin {
+  function changeFeeAccount(address _feeAccount) public onlyOwner {
     feeAccount = _feeAccount;
   }
 
-  function changeFeeMake(uint _feeMake) public isAdmin {
+  function changeFeeMake(uint _feeMake) public onlyOwner {
     require(_feeMake <= feeMake);
     feeMake = _feeMake;
   }
 
-  function changeFeeTake(uint _feeTake)  public isAdmin {
+  function changeFeeTake(uint _feeTake)  public onlyOwner {
     require((_feeTake < feeTake) && (_feeTake >= feeRebate));
     feeTake = _feeTake;
   }
 
-  function changeFeeRebate(uint _feeRebate)  public isAdmin {
+  function changeFeeRebate(uint _feeRebate)  public onlyOwner {
      require((_feeRebate >= feeRebate) && (_feeRebate <= feeTake));
     feeRebate = _feeRebate;
   }
 
-  function deposit() public payable {
+  function deposit() public payable whenNotPaused()  {
     tokens[0][msg.sender] = tokens[0][msg.sender].add( msg.value);
     Deposit(0, msg.sender, msg.value, tokens[0][msg.sender]);
   }
 
-  function withdraw(uint _amount) public {
+  function withdraw(uint _amount) public whenNotPaused()  {
     require(tokens[0][msg.sender] >= _amount);
     tokens[0][msg.sender] = tokens[0][msg.sender].sub(_amount);
     msg.sender.transfer(_amount);
@@ -108,7 +101,7 @@ contract RootDeltaExchange  {
     Withdraw(0, msg.sender, _amount, tokens[0][msg.sender]);
   }
 
-  function depositToken(address _token, uint _amount) public {
+  function depositToken(address _token, uint _amount) public whenNotPaused()  {
     //remember to call Token(address).approve(this, amount) or this contract will not be able to do the transfer on your behalf.
     require(_token!=address(0));
     if (!ERC20(_token).transferFrom(msg.sender, this, _amount)) revert();
@@ -116,7 +109,7 @@ contract RootDeltaExchange  {
     Deposit(_token, msg.sender, _amount, tokens[_token][msg.sender]);
   }
 
-  function withdrawToken(address _token, uint _amount) public {
+  function withdrawToken(address _token, uint _amount) public whenNotPaused() {
     require(_token!=address(0));
     require(tokens[_token][msg.sender] >= _amount);
 
@@ -130,13 +123,13 @@ contract RootDeltaExchange  {
     return tokens[_token][_user];
   }
 
-  function order(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public {
+  function order(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public whenNotPaused()  {
     bytes32 hash = sha256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     orders[msg.sender][hash] = true;
     Order(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce, msg.sender);
   }
 
-  function trade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount) public {
+  function trade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount) public whenNotPaused()  {
     //amount is in amountGet terms
     bytes32 hash = sha256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     if (!(
@@ -190,10 +183,15 @@ contract RootDeltaExchange  {
     return orderFills[_user][hash];
   }
 
-  function cancelOrder(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, uint8 _v, bytes32 _r, bytes32 _s) public {
+  function cancelOrder(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, uint8 _v, bytes32 _r, bytes32 _s) public whenNotPaused()  {
     bytes32 hash = keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     if (!(orders[msg.sender][hash] || ecrecover(keccak256("\x19Ethereum Signed Message:\n32", hash),_v,_r,_s) == msg.sender)) revert();
     orderFills[msg.sender][hash] = _amountGet;
     Cancel(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce, msg.sender, _v, _r, _s);
   }
+  
+  function getStatus() public  view returns(bool _paused,address _owner,address _feeAccount,address _accountLevelsAddr,uint _feeMake,uint _feeTake,uint _feeRebate){
+      return (paused,owner,feeAccount,accountLevelsAddr,feeMake,feeTake,feeRebate);
+  }
+
 }
