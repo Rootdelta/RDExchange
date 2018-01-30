@@ -1,10 +1,14 @@
-pragma solidity ^0.4.9;
+pragma solidity ^0.4.18;
 
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/math/SafeMath.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/ERC20/StandardToken.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/token/ERC20/ERC20.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
-import "github.com/OpenZeppelin/zeppelin-solidity/contracts/ownership/Ownable.sol";
+
+import 'zeppelin-solidity/contracts/ownership/Ownable.sol';
+import 'zeppelin-solidity/contracts/lifecycle/Pausable.sol';
+import 'zeppelin-solidity/contracts/token/ERC20/ERC20.sol';
+import 'zeppelin-solidity/contracts/token/ERC20/ERC20Basic.sol';
+import 'zeppelin-solidity/contracts/token/ERC20/BasicToken.sol';
+import 'zeppelin-solidity/contracts/token/ERC20/StandardToken.sol';
+import 'zeppelin-solidity/contracts/math/SafeMath.sol';
+
 
 contract ReserveToken is StandardToken {
   using SafeMath for uint256;
@@ -193,5 +197,22 @@ contract RootDeltaExchange is Pausable{
   function getStatus() public  view returns(bool _paused,address _owner,address _feeAccount,address _accountLevelsAddr,uint _feeMake,uint _feeTake,uint _feeRebate){
       return (paused,owner,feeAccount,accountLevelsAddr,feeMake,feeTake,feeRebate);
   }
+
+  function userAddress( bytes32 _msg, uint8 _v, bytes32 _r, bytes32 _s) public pure returns (address) {
+
+  address user = ecrecover(keccak256("\x19Ethereum Signed Message:\n32", _msg),_v,_r,_s);
+
+  return (user);
+
+  }
+
+  function verifyHash(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public view returns (bytes32){
+
+  bytes32 hash = keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+
+  return hash;
+
+  }
+
 
 }
