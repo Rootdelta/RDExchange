@@ -7,37 +7,29 @@ import 'zeppelin-solidity/contracts/token/ERC20/ERC20.sol';
 import 'zeppelin-solidity/contracts/token/ERC20/ERC20Basic.sol';
 import 'zeppelin-solidity/contracts/token/ERC20/BasicToken.sol';
 import 'zeppelin-solidity/contracts/token/ERC20/StandardToken.sol';
+import 'zeppelin-solidity/contracts/token/ERC20/MintableToken.sol';
 import 'zeppelin-solidity/contracts/math/SafeMath.sol';
 
 
-contract ReserveToken is StandardToken {
-  using SafeMath for uint256;
-  address public minter;
-  function ReserveToken() public {
-    minter = msg.sender;
-  }
-  function create(address account, uint amount) public {
-    require(msg.sender == minter);
-    balances[account] = balances[account].add(amount);
-    totalSupply_ = totalSupply_.add(amount);
-  }
-  function destroy(address account, uint amount) public {
-    require(msg.sender == minter);
+contract RDToken is MintableToken {
+
+  function destroy(address account, uint amount) public onlyOwner {
     require (balances[account] >= amount);
     balances[account] = balances[account].sub(amount);
     totalSupply_ = totalSupply_.sub(amount);
   }
+  
 }
 
 
-contract  AccountLevels {
+contract  AccountLevels is Ownable{
   mapping (address => uint) public accountLevels;
 
-  function setAccountLevel(address user, uint level) public {
+  function setAccountLevel(address user, uint level) public onlyOwner {
     accountLevels[user] = level;
   }
 
-  function accountLevel(address user) public constant returns(uint) {
+  function accountLevel(address user) public view returns(uint) {
     return accountLevels[user];
   }
 }
@@ -59,8 +51,7 @@ contract RootDeltaExchange is Pausable{
   event Deposit(address token, address user, uint amount, uint balance);
   event Withdraw(address token, address user, uint amount, uint balance);
 
-  function RootDeltaExchange(address _owner, address _feeAccount, address _accountLevelsAddr, uint _feeMake, uint _feeTake, uint _feeRebate) public {
-    owner = _owner;
+  function RootDeltaExchange(address _feeAccount, address _accountLevelsAddr, uint _feeMake, uint _feeTake, uint _feeRebate) public {
     feeAccount = _feeAccount;
     accountLevelsAddr = _accountLevelsAddr;
     feeMake = _feeMake;
