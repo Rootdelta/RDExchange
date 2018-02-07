@@ -34,6 +34,29 @@ contract  AccountLevels is Ownable{
   }
 }
 
+contract RDToken is MintableToken {
+
+  function destroy(address account, uint amount) public onlyOwner {
+    require (balances[account] >= amount);
+    balances[account] = balances[account].sub(amount);
+    totalSupply_ = totalSupply_.sub(amount);
+  }
+  
+}
+
+
+contract  AccountLevels is Ownable{
+  mapping (address => uint) public accountLevels;
+
+  function setAccountLevel(address user, uint level) public onlyOwner {
+    accountLevels[user] = level;
+  }
+
+  function accountLevel(address user) public view returns(uint) {
+    return accountLevels[user];
+  }
+}
+
 contract RootDeltaExchange is Pausable{
   using SafeMath for uint256;
   address public feeAccount; //the account that will receive fees
@@ -47,7 +70,7 @@ contract RootDeltaExchange is Pausable{
 
   event Order(address tokenGet, uint amountGet, address tokenGive, uint amountGive, uint expires, uint nonce, address user);
   event Cancel(address tokenGet, uint amountGet, address tokenGive, uint amountGive, uint expires, uint nonce, address user, uint8 v, bytes32 r, bytes32 s);
-  event Trade(address tokenGet, uint amountGet, address tokenGive, uint amountGive, address get, address give);
+  event Trade(address tokenGet, uint amountGet, address tokenGive, uint amountGive, address get, address give,bytes32 orderHash);
   event Deposit(address token, address user, uint amount, uint balance);
   event Withdraw(address token, address user, uint amount, uint balance);
 
@@ -119,14 +142,14 @@ contract RootDeltaExchange is Pausable{
   }
 
   function order(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public whenNotPaused()  {
-    bytes32 hash = sha256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    bytes32 hash = verifyHash(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     orders[msg.sender][hash] = true;
     Order(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce, msg.sender);
   }
 
   function trade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount) public whenNotPaused()  {
     //amount is in amountGet terms
-    bytes32 hash = sha256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    bytes32 hash =verifyHash(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     if (!(
       (orders[_user][hash] || ecrecover(keccak256("\x19Ethereum Signed Message:\n32", hash),_v,_r,_s) == _user) &&
       block.number <= _expires &&
@@ -134,7 +157,7 @@ contract RootDeltaExchange is Pausable{
     )) revert();
     tradeBalances(_tokenGet, _amountGet, _tokenGive, _amountGive, _user, _amount);
     orderFills[_user][hash] = orderFills[_user][hash].add(_amount);
-    Trade(_tokenGet, _amount, _tokenGive, _amountGive * _amount / _amountGet, _user, msg.sender);
+    Trade(_tokenGet, _amount, _tokenGive, _amountGive * _amount / _amountGet, _user, msg.sender,hash);
   }
 
   function tradeBalances(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, address _user, uint _amount) private {
@@ -162,7 +185,7 @@ contract RootDeltaExchange is Pausable{
   }
 
   function availableVolume(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s) public view returns(uint) {
-    bytes32 hash = sha256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    bytes32 hash = verifyHash(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     if (!(
       (orders[_user][hash] || ecrecover(keccak256("\x19Ethereum Signed Message:\n32", hash),_v,_r,_s) == _user) &&
       block.number <= _expires
@@ -174,7 +197,7 @@ contract RootDeltaExchange is Pausable{
   }
 
   function amountFilled(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user) public view returns(uint) {
-    bytes32 hash = keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    bytes32 hash = verifyHash(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
     return orderFills[_user][hash];
   }
 
@@ -199,11 +222,11 @@ contract RootDeltaExchange is Pausable{
 
   function verifyHash(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public view returns (bytes32){
 
-  bytes32 hash = keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    return keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
 
-  return hash;
 
   }
 
 
 }
+
