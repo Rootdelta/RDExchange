@@ -1,6 +1,5 @@
 pragma solidity ^0.4.18;
 
-
 import 'zeppelin-solidity/contracts/ownership/Ownable.sol';
 import 'zeppelin-solidity/contracts/lifecycle/Pausable.sol';
 import 'zeppelin-solidity/contracts/token/ERC20/ERC20.sol';
@@ -11,59 +10,18 @@ import 'zeppelin-solidity/contracts/token/ERC20/MintableToken.sol';
 import 'zeppelin-solidity/contracts/math/SafeMath.sol';
 
 
-contract RDToken is MintableToken {
-
-  function destroy(address account, uint amount) public onlyOwner {
-    require (balances[account] >= amount);
-    balances[account] = balances[account].sub(amount);
-    totalSupply_ = totalSupply_.sub(amount);
-  }
-  
-}
-
-
-contract  AccountLevels is Ownable{
-  mapping (address => uint) public accountLevels;
-
-  function setAccountLevel(address user, uint level) public onlyOwner {
-    accountLevels[user] = level;
-  }
-
-  function accountLevel(address user) public view returns(uint) {
-    return accountLevels[user];
-  }
-}
-
-contract RDToken is MintableToken {
-
-  function destroy(address account, uint amount) public onlyOwner {
-    require (balances[account] >= amount);
-    balances[account] = balances[account].sub(amount);
-    totalSupply_ = totalSupply_.sub(amount);
-  }
-  
-}
-
-
-contract  AccountLevels is Ownable{
-  mapping (address => uint) public accountLevels;
-
-  function setAccountLevel(address user, uint level) public onlyOwner {
-    accountLevels[user] = level;
-  }
-
-  function accountLevel(address user) public view returns(uint) {
-    return accountLevels[user];
-  }
-}
 
 contract RootDeltaExchange is Pausable{
   using SafeMath for uint256;
   address public feeAccount; //the account that will receive fees
-  address public accountLevelsAddr; //the address of the AccountLevels contract
+  address public RDXToken;      
   uint public feeMake; //percentage times (1 ether)
+  uint public feeMakeThreshold;
   uint public feeTake; //percentage times (1 ether)
-  uint public feeRebate; //percentage times (1 ether)
+  uint public feeTakeThreshold;
+  uint public maxTakeDiscount;
+  uint public maxMakeDiscount;
+  
   mapping (address => mapping (address => uint)) public tokens; //mapping of token addresses to mapping of account balances (token=0 means Ether)
   mapping (address => mapping (bytes32 => bool)) public orders; //mapping of user accounts to mapping of order hashes to booleans (true = submitted by user, equivalent to offchain signature)
   mapping (address => mapping (bytes32 => uint)) public orderFills; //mapping of user accounts to mapping of order hashes to uints (amount of order that has been filled)
@@ -74,36 +32,44 @@ contract RootDeltaExchange is Pausable{
   event Deposit(address token, address user, uint amount, uint balance);
   event Withdraw(address token, address user, uint amount, uint balance);
 
-  function RootDeltaExchange(address _feeAccount, address _accountLevelsAddr, uint _feeMake, uint _feeTake, uint _feeRebate) public {
+  function RootDeltaExchange(address _feeAccount, address _RDXToken, uint _feeMake,uint _feeTake, uint _feeMakeThreshold, uint _feeTakeThreshold, uint _maxTakeDiscount, uint _maxMakeDiscount ) public {
     feeAccount = _feeAccount;
-    accountLevelsAddr = _accountLevelsAddr;
     feeMake = _feeMake;
     feeTake = _feeTake;
-    feeRebate = _feeRebate;
+    feeMakeThreshold = _feeMakeThreshold;
+    feeTakeThreshold = _feeTakeThreshold;
+    maxTakeDiscount = _maxTakeDiscount;
+    maxMakeDiscount = _maxMakeDiscount;
+    RDXToken = _RDXToken;
+      
   }
-
-
-  function changeAccountLevelsAddr(address _accountLevelsAddr) public onlyOwner {
-    accountLevelsAddr = _accountLevelsAddr;
-  }
-
+  
   function changeFeeAccount(address _feeAccount) public onlyOwner {
     feeAccount = _feeAccount;
   }
 
   function changeFeeMake(uint _feeMake) public onlyOwner {
-    require(_feeMake <= feeMake);
     feeMake = _feeMake;
   }
 
   function changeFeeTake(uint _feeTake)  public onlyOwner {
-    require((_feeTake < feeTake) && (_feeTake >= feeRebate));
     feeTake = _feeTake;
   }
 
-  function changeFeeRebate(uint _feeRebate)  public onlyOwner {
-     require((_feeRebate >= feeRebate) && (_feeRebate <= feeTake));
-    feeRebate = _feeRebate;
+  function changeFeeMakeThreshold(uint _feeMakeThreshold) public onlyOwner {
+    feeMakeThreshold = _feeMakeThreshold;
+  }
+
+  function changeFeeTakeThreshold(uint _feeTakeThreshold)  public onlyOwner {
+    feeTakeThreshold = _feeTakeThreshold;
+  }
+  
+  function changeMaxTakeDiscount(uint _maxTakeDiscount) public onlyOwner {
+    maxTakeDiscount = _maxTakeDiscount;
+  }
+    
+  function changeMaxMakeDiscount(uint _maxMakeDiscount) public onlyOwner {
+    maxMakeDiscount = _maxMakeDiscount;
   }
 
   function deposit() public payable whenNotPaused()  {
@@ -157,23 +123,52 @@ contract RootDeltaExchange is Pausable{
     )) revert();
     tradeBalances(_tokenGet, _amountGet, _tokenGive, _amountGive, _user, _amount);
     orderFills[_user][hash] = orderFills[_user][hash].add(_amount);
-    Trade(_tokenGet, _amount, _tokenGive, _amountGive * _amount / _amountGet, _user, msg.sender,hash);
+    Trade(_tokenGet, _amount, _tokenGive, _amountGive.mul( _amount / _amountGet), _user, msg.sender,hash);
   }
 
   function tradeBalances(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, address _user, uint _amount) private {
-    uint feeMakeXfer = _amount.mul(feeMake) / (1 ether);
-    uint feeTakeXfer = _amount.mul(feeTake) / (1 ether);
-    uint feeRebateXfer = 0;
-    if (accountLevelsAddr != 0x0) {
-      uint accountLevel = AccountLevels(accountLevelsAddr).accountLevel(_user);
-      if (accountLevel==1) feeRebateXfer =_amount.mul(feeRebate) / (1 ether);
-      if (accountLevel==2) feeRebateXfer = feeTakeXfer;
-    }
+    uint one = 1;
+    uint feeMakeUser = one.sub(calculateMakerDiscount()).mul(feeMake);
+    uint feeTakeUser = one.sub(calculateTakerDiscount()).mul(feeTake);
+
+    uint feeMakeXfer = _amount.mul(feeMakeUser) / (1 ether);
+    uint feeTakeXfer = _amount.mul(feeTakeUser) / (1 ether);
+
     tokens[_tokenGet][msg.sender] = tokens[_tokenGet][msg.sender].sub(_amount.add(feeTakeXfer));
-    tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_amount.add(feeRebateXfer).sub(feeMakeXfer));
-    tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(feeMakeXfer.add(feeTakeXfer).sub(feeRebateXfer));
+    tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_amount.sub(feeMakeXfer));
+    tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(feeMakeXfer.add(feeTakeXfer));
     tokens[_tokenGive][_user] = tokens[_tokenGive][_user].sub(_amountGive.mul(_amount) / _amountGet);
     tokens[_tokenGive][msg.sender] = tokens[_tokenGive][msg.sender].add( _amountGive.mul( _amount) / _amountGet);
+  }
+
+  function calculateTakerDiscount() private view returns (uint) {
+    uint userRDXBalance = tokens[RDXToken][msg.sender];
+    // There won't be a discount if the user does not own any RDX tokens.
+    if (userRDXBalance == 0) {
+      return 0;
+    }
+    uint takerDiscount = userRDXBalance.div(feeTakeThreshold).mul(maxTakeDiscount);
+    if (takerDiscount >= maxTakeDiscount) {
+      return maxTakeDiscount;
+    } else if (takerDiscount <= 0) {
+      return 0;
+    }
+    return takerDiscount;
+  }
+
+  function calculateMakerDiscount() private view returns (uint) {
+    uint userRDXBalance = tokens[RDXToken][msg.sender];
+    // There won't be a discount if the user does not own any RDX tokens.
+    if (userRDXBalance == 0) {
+      return 0;
+    }
+    uint makerDiscount = userRDXBalance.div(feeMakeThreshold).mul(maxMakeDiscount );
+    if (makerDiscount >= maxTakeDiscount) {
+      return maxTakeDiscount;
+    } else if (makerDiscount <= 0) {
+      return 0;
+    }
+    return makerDiscount;
   }
 
   function testTrade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount, address _sender) public view returns(bool) {
@@ -208,25 +203,18 @@ contract RootDeltaExchange is Pausable{
     Cancel(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce, msg.sender, _v, _r, _s);
   }
   
-  function getStatus() public  view returns(bool _paused,address _owner,address _feeAccount,address _accountLevelsAddr,uint _feeMake,uint _feeTake,uint _feeRebate){
-      return (paused,owner,feeAccount,accountLevelsAddr,feeMake,feeTake,feeRebate);
+  function getStatus() public  view returns(bool _paused,address _owner,address _feeAccount,uint _feeMake,uint _feeTake,uint _feeMakeThreshold, uint _feeTakeThreshold, uint _maxTakeDiscount, uint _maxMakeDiscount){
+      return (paused,owner,feeAccount,feeMake,feeTake, feeMakeThreshold, feeTakeThreshold, maxTakeDiscount, maxMakeDiscount);
   }
 
   function userAddress( bytes32 _msg, uint8 _v, bytes32 _r, bytes32 _s) public pure returns (address) {
-
-  address user = ecrecover(keccak256("\x19Ethereum Signed Message:\n32", _msg),_v,_r,_s);
-
-  return (user);
-
+    address user = ecrecover(keccak256("\x19Ethereum Signed Message:\n32", _msg),_v,_r,_s);
+    return (user);
   }
 
   function verifyHash(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce) public view returns (bytes32){
-
     return keccak256(this, _tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
-
-
   }
-
 
 }
 
