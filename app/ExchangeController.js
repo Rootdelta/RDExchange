@@ -2,6 +2,7 @@ exports.ExchangeController = class {
 
     constructor(config, tokenInstance, exchangeInstance, exchangeContract, exchangeAddress, web3) {
         this.SignerProvider = require('ethjs-provider-signer');
+        //this.logger = require('logger').ceateLogger();
         this.sign = require('ethjs-signer').sign;
         this.Eth = require('ethjs-query');
         this.tokenInstance = tokenInstance;
@@ -12,22 +13,26 @@ exports.ExchangeController = class {
         this.exchangecontract = exchangeContract;
     }
 
+    async getBalance(token,account){
+        var balance = await this.exchangeInstance.balanceOf.call(token,account,{from : account});
+        return balance.toNumber();
+    }
+
     async depositToken(amount,account) {
         // tokens must have been approved first
 
         try {
-        	account = determineAccountToUse(account);
+            account = determineAccountToUse(account);
             var allow = await this.tokenInstance.allowance(account, this.exchangeAddress);
-            // ? assert allowance sufficient
             var tx = await this.exchangeInstance.depositToken(this.tokenAddress,amount,{from : account});
 
-            // console.log(deposit);
         }
         catch (error) {
-            console.log(error);
+            // logger.error(error);
+            console.error(error);
         }
     }
-    
+
     async cancelOrder (tokenWantedAddress, tokenWantedAmount, tokenOfferedAddress, tokenOfferedAmount, expires, nonce, account) {
         account = determineAccountToUse(account);
         return this.exchangeInstance.cancelOrder(tokenWantedAddress, tokenWantedAmount, tokenOfferedAddress, tokenOfferedAmount, expires, nonce, 0, this.web3.fromAscii(""), this.web3.fromAscii(""), {from: account});
@@ -36,13 +41,14 @@ exports.ExchangeController = class {
     async withdrawToken(amount,account) {
 
         try {
-        	account = determineAccountToUse(account);
+            account = determineAccountToUse(account);
             var tx = await this.exchangeInstance.withdrawToken(this.tokenAddress, amount, {from: account});
             var newBalance = await this.exchangeInstance.balanceOf(this.tokenAddress, account);
             console.log(newBalance);
         }
         catch (error) {
-            console.log(error);
+            // logger.error(error);
+            console.error(error);
         }
     }
 
@@ -55,7 +61,7 @@ exports.ExchangeController = class {
         return web3.eth.getTransactionCount(account);
     }
 
-  
+
     async signAndSendTransaction(txData, privateKey) {
 
         this.sendTx(txData, privateKey);
@@ -72,13 +78,30 @@ exports.ExchangeController = class {
             await eth.sendTransaction(rawTXData, this.TxCallback);
         }
         catch (error) {
-            console.log("Error is " + error);
+            // logger.error(error);
+            console.error(error);
         }
     }
 
     TxCallback(error, result) {
-        console.log("error is " + error);
-        console.log("result is " + result);
+        // logger.error(error);
+        console.error(error);
+        // logger.info(result);
+        console.log(result);
+    }
+
+    async createTestAllowance(amount, account){
+
+        try{
+            determineAccountToUse(account);
+            var allow = await this.tokenInstance.approve(this.exchangeAddress,amount, {from : account});
+
+        }
+        catch(error){
+            // logger.error(error);
+            console.error(error);
+        }
+
     }
 
 }
@@ -92,3 +115,4 @@ function determineAccountToUse(account) {
     }
     return account;
 }
+
