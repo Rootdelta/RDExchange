@@ -18,7 +18,7 @@ contract RootDeltaExchange is Pausable{
   uint public maxTakeDiscount;
   uint public maxMakeDiscount;
   uint constant public scalingFactor = 1000;
-  uint constant public scaledOneHundredPercent = 100 * scalingFactor;
+  uint constant public scaledOneHundredPercent = scalingFactor*100;
   // The minimum discount percentage is 0.01% i.e. scaled it is 10
   uint constant public minimumScaledDiscount = 10;
 
@@ -31,7 +31,8 @@ contract RootDeltaExchange is Pausable{
   event Trade(address tokenGet, uint amountGet, address tokenGive, uint amountGive, address get, address give,bytes32 orderHash);
   event Deposit(address token, address user, uint amount, uint balance);
   event Withdraw(address token, address user, uint amount, uint balance);
-  event Temp(string name,uint amount);
+
+
 
   modifier onlyWhenDiscountIsValid(uint _maxDiscount, uint _maxFee) {
     require(_maxDiscount <= scaledOneHundredPercent);
@@ -47,7 +48,7 @@ contract RootDeltaExchange is Pausable{
     maxTakeDiscount = _maxTakeDiscount;
     maxMakeDiscount = _maxMakeDiscount;
     RDXToken = _RDXToken;
-    Temp("minimum scale", minimumScaledDiscount);
+
   }
 
   function changeFeeAccount(address _feeAccount) public onlyOwner {
@@ -55,12 +56,12 @@ contract RootDeltaExchange is Pausable{
   }
 
   function changeFeeMake(uint _feeMake) public onlyOwner {
-    require(_feeMake >= maxMakeDiscount);
+    require(_feeMake <= scaledOneHundredPercent);
     feeMake = _feeMake;
   }
 
   function changeFeeTake(uint _feeTake)  public onlyOwner {
-    require(_feeTake >= maxTakeDiscount);
+    require(_feeTake <= scaledOneHundredPercent);
     feeTake = _feeTake;
   }
 
@@ -124,82 +125,84 @@ contract RootDeltaExchange is Pausable{
   function trade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount) public whenNotPaused()  {
     //amount is in amountGet terms
     bytes32 hash =verifyHash(_tokenGet, _amountGet, _tokenGive, _amountGive, _expires, _nonce);
+    // Allow for partial fills by reducing the size of the _amount requested if it is too large
+    if (orderFills[_user][hash].add(_amount) > _amountGet) {
+      _amount = _amountGet.sub(orderFills[_user][hash]);
+    }
     uint tradeAmount = _amountGive.mul( _amount ).div( _amountGet);
     if (!(
     (orders[_user][hash] || ecrecover(keccak256("\x19Ethereum Signed Message:\n32", hash),_v,_r,_s) == _user) &&
     block.number <= _expires &&
     orderFills[_user][hash].add(_amount) <= _amountGet
     )) revert();
-    Temp("trade: tradeAmount: ", tradeAmount);
     tradeBalances(_tokenGet, _tokenGive, _user, _amount,tradeAmount);
     orderFills[_user][hash] = orderFills[_user][hash].add(_amount);
     Trade(_tokenGet, _amount, _tokenGive, tradeAmount, _user, msg.sender,hash);
   }
 
-  function tradeBalances(address _tokenGet,  address _tokenGive, address _user, uint _amount, uint tradeAmount) private {
+  function tradeBalances(address _tokenGet,  address _tokenGive, address _user, uint _getAmount, uint _giveAmount) public {
     uint feeMakeUser = feeMake.sub(calculateMakerDiscount(_user));
     uint feeTakeUser = feeTake.sub(calculateTakerDiscount());
-    Temp("tradeBalances: feeMakeUser", feeMakeUser);
-    Temp("tradeBalances: feeTakeUser", feeTakeUser);
 
-    uint feeMakeXfer = calculateScaledPercentageOfScaledValue(_amount, feeMakeUser);
-    uint feeTakeXfer = calculateScaledPercentageOfScaledValue(tradeAmount, feeTakeUser);
-    Temp("tradeBalances: feeMakeXfer", feeMakeXfer);
-    Temp("tradeBalances: feeTakeXfer", feeTakeXfer);
-    if((_amount.add(feeTakeXfer)>tokens[_tokenGet][msg.sender])||(_amount < feeMakeXfer) ){
-      revert();
+    uint feeMakeXfer = calculateScaledPercentageOfScaledValue(_getAmount, feeMakeUser);
+    uint feeTakeXfer = calculateScaledPercentageOfScaledValue(_giveAmount, feeTakeUser);
+   if((_getAmount >tokens[_tokenGet][msg.sender])||(_getAmount < feeMakeXfer) ){
+        revert();
     }
-    tokens[_tokenGet][msg.sender] = tokens[_tokenGet][msg.sender].sub(_amount.add(feeTakeXfer));
-    tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_amount.sub(feeMakeXfer));
-    tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(feeMakeXfer);
+     tokens[_tokenGet][msg.sender] = tokens[_tokenGet][msg.sender].sub(_getAmount);
+    tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_getAmount.sub(feeMakeXfer));
+     tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(feeMakeXfer);
+     tokens[_tokenGive][_user] = tokens[_tokenGive][_user].sub(_giveAmount);
+    tokens[_tokenGive][msg.sender] = tokens[_tokenGive][msg.sender].add(_giveAmount.sub(feeTakeXfer));
     tokens[_tokenGive][feeAccount] = tokens[_tokenGive][feeAccount].add(feeTakeXfer);
-    tokens[_tokenGive][_user] = tokens[_tokenGive][_user].sub(tradeAmount);
-    tokens[_tokenGive][msg.sender] = tokens[_tokenGive][msg.sender].add(tradeAmount);
   }
 
-  function calculateTakerDiscount() private returns (uint) {
+  function calculateTakerDiscount() public returns (uint) {
     uint userRDXBalance = tokens[RDXToken][msg.sender];
     // There won't be a discount if the user does not own any RDX tokens.
     if (userRDXBalance == 0) {
       return 0;
     }
-    uint takerDiscount = userRDXBalance.div(feeTakeThreshold).mul(scalingFactor);
-    Temp("calculateTakerDiscount: scaled discount percent", takerDiscount);
+    uint takerDiscount = userRDXBalance.mul(scalingFactor).div(feeTakeThreshold);
     if (takerDiscount >= maxTakeDiscount) {
       takerDiscount =  maxTakeDiscount;
     } else if (takerDiscount <= 0) {
       return 0;
     }
-    takerDiscount = calculateScaledPercentageOfScaledValue(feeTake, takerDiscount);
+    takerDiscount = calculateScaledPercentageOfScaledPercentage(feeTake, takerDiscount);
     if (takerDiscount < minimumScaledDiscount) {
       return 0;
     }
     return takerDiscount;
   }
 
-  function calculateMakerDiscount(address makerAddress) private returns (uint) {
+  function calculateMakerDiscount(address makerAddress) public returns (uint) {
     uint userRDXBalance = tokens[RDXToken][makerAddress];
     // There won't be a discount if the user does not own any RDX tokens.
     if (userRDXBalance == 0) {
       return 0;
     }
-    uint makerDiscount = userRDXBalance.div(feeMakeThreshold).mul(scalingFactor);
-    Temp("calculateMakerDiscount: scaled discount percent", makerDiscount);
+    uint makerDiscount = userRDXBalance.mul(scalingFactor).div(feeMakeThreshold);
     if (makerDiscount >= maxMakeDiscount) {
       makerDiscount =  maxMakeDiscount;
     } else if (makerDiscount <= 0) {
       return 0;
     }
-    makerDiscount =  calculateScaledPercentageOfScaledValue(feeMake, makerDiscount);
+     makerDiscount =  calculateScaledPercentageOfScaledPercentage(feeMake, makerDiscount);
     if (makerDiscount < minimumScaledDiscount) {
       return 0;
     }
     return makerDiscount;
   }
 
-  function calculateScaledPercentageOfScaledValue(uint scaledValue, uint scaledPercentage) returns (uint) {
-    return scaledValue.mul(scaledPercentage.mul(scalingFactor).div(scaledOneHundredPercent)).div(scalingFactor);
+  function calculateScaledPercentageOfScaledPercentage(uint scaledPercentageOf, uint scaledPercentage) private returns (uint) {
+    return scaledPercentageOf.mul(scaledPercentage).div(scaledOneHundredPercent);
   }
+
+  function calculateScaledPercentageOfScaledValue(uint scaledValue, uint scaledPercentage) private returns (uint) {
+    return scaledValue.mul(scaledPercentage).div(scaledOneHundredPercent);
+  }
+
 
   function testTrade(address _tokenGet, uint _amountGet, address _tokenGive, uint _amountGive, uint _expires, uint _nonce, address _user, uint8 _v, bytes32 _r, bytes32 _s, uint _amount, address _sender) public view returns(bool) {
     if (!(

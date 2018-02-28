@@ -6,8 +6,20 @@ const expect = chai.expect;
 const scalingFactor = 1000;
 
 contract('RootDeltaExchange', (accounts) => {
+    const owner = accounts[0];
+    const feeReceiver = accounts[1];
+    const actor1 = accounts[2];
+    const actor2 = accounts[3];
+    const actor3 = accounts[4];
+    const initialNumTokens = 10000000;
+    const amountGive  = 100000;
+    const amountGet   = 100000;
+    const tradeAmount = 10000;
+    const scalingFactor = 1000;
+    const rdxTokenDecimalPlaces = 100000000;
+    const ethDecimalPlaces = 100000000;
+
     let admin;
-    let feeAccount = accounts[1];
     let rdeContract;
     let rdToken;
     const etherTokenAddress = "0x0000000000000000000000000000000000000000";
@@ -16,8 +28,10 @@ contract('RootDeltaExchange', (accounts) => {
     beforeEach(async () => {
         admin = accounts[0];
         rdToken = await RDToken.deployed();
-        let result = rdToken.mint(feeAccount,10000);
-        rdeContract= await RootDeltaExchange.new(feeAccount,RDToken.address,6,6,10,10,2,2);
+        let result = rdToken.mint(feeReceiver,10000);
+
+
+        rdeContract= await RootDeltaExchange.new(feeReceiver,RDToken.address,6,6,10,10,2,2);
     });
 
     describe('check the max discount values', () => {
@@ -68,10 +82,10 @@ contract('RootDeltaExchange', (accounts) => {
             let currentStatus = await rdeContract.getStatus.call();
 
 
-            await rdeContract.changeFeeAccount(feeAccount, { from: admin });
+            await rdeContract.changeFeeAccount(feeReceiver, { from: admin });
             let result = await rdeContract.feeAccount.call();
 
-            expect(result).to.equal(feeAccount);
+            expect(result).to.equal(feeReceiver);
         });
     });
 
@@ -230,15 +244,5 @@ contract('RootDeltaExchange', (accounts) => {
 
 
 
-    describe('#order()', () => {
-        xit('places an order', () => {
-        });
-    });
-
-    describe('#trade()', () => {
-        xit('places a trade', () => {
-        });
-    });
-
-
+ 
 });
