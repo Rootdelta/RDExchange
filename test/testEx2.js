@@ -257,7 +257,7 @@ contract('Exchange Controller Tests', function (accounts) {
             }
         });
 
-        xit('should be possible for a non-parity take order with a vastly larger amount than is available to match a make order and the fees should be correct', async function () {
+        it('should be possible for a non-parity take order with a vastly larger amount than is available to match a make order and the fees should be correct', async function () {
             try {
                 // Set up test
                 // Deposit the token in the exchange - and give the necessary permissions
@@ -277,21 +277,24 @@ contract('Exchange Controller Tests', function (accounts) {
                 // Test
                 let largerAmount = amountGetLarge * 10;
                 await controllerInstance.trade(tradedTokenInstance2.address, amountGetLarge, actor1, tradedTokenInstance1.address, amountGive, 9999, 0, largerAmount, actor2);
+                console.log("largerAmount " + largerAmount);
                 //  now check the fee
+                
                 let feeBalanceMaker = await controllerInstance.getBalance(tradedTokenInstance2.address,feeReceiver);
                 let expectedMakerFee = amountGetLarge * (makeFee / (100 * scalingFactor));
                 assert.equal(feeBalanceMaker, expectedMakerFee);
                 let feeBalanceTaker = await controllerInstance.getBalance(tradedTokenInstance1.address,feeReceiver);
                 let expectedTakerFee = amountGive * (takeFee / (100 * scalingFactor));
                 assert.equal(feeBalanceTaker, expectedTakerFee);
+                console.log("expectedMakerFee " + expectedMakerFee);
                 let actor1Token1Balance = await controllerInstance.getBalance(tradedTokenInstance1.address,actor1);
                 assert.equal(actor1Token1Balance, initialNumTokens - amountGive);
                 let actor1Token2Balance = await controllerInstance.getBalance(tradedTokenInstance2.address,actor1);
                 assert.equal(actor1Token2Balance, amountGetLarge - expectedMakerFee);
                 let actor2Token1Balance = await controllerInstance.getBalance(tradedTokenInstance1.address,actor2);
-                assert.equal(actor2Token1Balance, amountGive);
+                assert.equal(actor2Token1Balance, amountGive - expectedTakerFee);
                 let actor2Token2Balance = await controllerInstance.getBalance(tradedTokenInstance2.address,actor2);
-                assert.equal(actor2Token2Balance, initialNumTokens - amountGetLarge - expectedTakerFee);
+                assert.equal(actor2Token2Balance, initialNumTokens - amountGetLarge );
             } catch (e) {
                 console.log(e);
                 throw e;
